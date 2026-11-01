@@ -6,13 +6,14 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "check = vérification normale, --list = lister les stations, --test = notification de test"
+        description: "check = vérification normale, --list = lister les stations, --test = notification de test, --simulation = fausse alerte de test"
         type: choice
         default: check
         options:
           - check
           - --list
           - --test
+          - --simulation
 
 jobs:
   alerte:
