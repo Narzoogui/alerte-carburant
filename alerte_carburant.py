@@ -10,6 +10,7 @@ Source des enseignes : OpenStreetMap (les données officielles n'ont pas l'ensei
 Modes :
   (aucun)   vérification normale, à lancer toutes les 10 minutes
   --test    envoie une notification de test
+  --simulation  simule une alerte (sans toucher à l'état enregistré : aucune fausse alerte ensuite)
   --list    liste les stations TotalEnergies dans le rayon autour de la ville
             et affiche la ligne STATION_IDS prête à copier
 
@@ -133,6 +134,39 @@ def stations_total_osm():
     return points
 
 
+def stations_total_nominatim():
+    """Solution de secours : recherche des stations Total via Nominatim (OpenStreetMap)."""
+    import time
+    lat, lon = CENTRE
+    marge_lat = (RAYON_KM + 5) / 111.0
+    marge_lon = (RAYON_KM + 5) / (111.0 * math.cos(math.radians(lat)))
+    # viewbox : gauche, haut, droite, bas
+    boite = f"{lon - marge_lon:.4f},{lat + marge_lat:.4f},{lon + marge_lon:.4f},{lat - marge_lat:.4f}"
+    entetes = {k: v for k, v in ENTETES_OSM.items() if k != "Content-Type"}
+    points = []
+    for i, nom in enumerate(("TotalEnergies", "Total Access", "Total")):
+        if i:
+            time.sleep(1.2)  # Nominatim demande au plus 1 requête par seconde
+        params = urllib.parse.urlencode(
+            {"q": nom, "format": "jsonv2", "limit": 40, "bounded": 1, "viewbox": boite}
+        )
+        req = urllib.request.Request(f"https://nominatim.openstreetmap.org/search?{params}", headers=entetes)
+        with urllib.request.urlopen(req, timeout=40) as r:
+            for res in json.load(r):
+                if res.get("category") == "amenity" and res.get("type") == "fuel":
+                    points.append((float(res["lat"]), float(res["lon"])))
+    return points
+
+
+def stations_total():
+    """Essaie Overpass, puis Nominatim si Overpass est indisponible."""
+    try:
+        return stations_total_osm()
+    except Exception as e:
+        print(f"Overpass indisponible ({e}) : essai avec Nominatim...")
+    return stations_total_nominatim()
+
+
 def disponible(station, carburant):
     """Un carburant est disponible s'il a un prix et n'est pas déclaré en rupture."""
     prix = station.get(f"{carburant}_prix")
@@ -165,7 +199,7 @@ def mode_liste(stations):
     proches.sort(key=lambda x: x[0])
 
     try:
-        total_osm = stations_total_osm()
+        total_osm = stations_total()
     except Exception as e:
         print(f"Impossible de récupérer les enseignes (OpenStreetMap) : {e}")
         total_osm = None
@@ -210,7 +244,11 @@ def main():
     else:
         stations = [s for s in stations if (s.get("ville") or "").strip().lower() == VILLE.lower()]
 
-    ancien = json.loads(STATE_FILE.read_text()) if STATE_FILE.exists() else None
+    simulation = "--simulation" in sys.argv
+    if simulation:
+        ancien = {}  # on fait comme si tout était indisponible au passage précédent
+    else:
+        ancien = json.loads(STATE_FILE.read_text()) if STATE_FILE.exists() else None
     nouveau, alertes = {}, []
     for s in stations:
         for c in CARBURANTS:
@@ -219,6 +257,14 @@ def main():
             # Alerte uniquement sur un passage indispo -> dispo (pas au tout premier lancement)
             if ancien is not None and nouveau[cle] and not ancien.get(cle, False):
                 alertes.append(f"{NOMS[c]} : {s.get('adresse')}, {s.get('cp')} {s.get('ville')}")
+
+    if simulation:
+        # Test uniquement : l'état réel n'est PAS modifié, donc aucune fausse alerte ensuite.
+        entete = "SIMULATION - ceci est un test, pas une vraie alerte.\n"
+        corps = "\n".join(alertes) if alertes else "Aucun carburant disponible dans tes stations en ce moment."
+        notifier("SIMULATION - carburant disponible", entete + corps)
+        print(f"Simulation : {len(stations)} station(s), {len(alertes)} ligne(s) envoyée(s). État réel inchangé.")
+        return
 
     STATE_FILE.write_text(json.dumps(nouveau))
 
