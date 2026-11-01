@@ -1,0 +1,36 @@
+name: Alerte carburant
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check = vérification normale, --list = lister les stations, --test = notification de test"
+        type: choice
+        default: check
+        options:
+          - check
+          - --list
+          - --test
+
+jobs:
+  alerte:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      # Garde le fichier d'état entre deux exécutions (pour détecter indisponible -> disponible)
+      - name: Restaurer l'état précédent
+        uses: actions/cache@v4
+        with:
+          path: etat_carburant.json
+          key: etat-${{ github.run_id }}
+          restore-keys: etat-
+
+      - name: Lancer le script
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          STATION_IDS: ${{ vars.STATION_IDS }}
+        run: python3 alerte_carburant.py ${{ inputs.mode }}
