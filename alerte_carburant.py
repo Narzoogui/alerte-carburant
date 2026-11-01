@@ -43,6 +43,7 @@ API = (
 OVERPASS = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
 ]
 # Overpass refuse les requêtes sans identification (erreur 406) : on se présente.
 ENTETES_OSM = {
@@ -94,28 +95,38 @@ def coordonnees(station):
 
 
 def stations_total_osm():
-    """Stations TotalEnergies connues d'OpenStreetMap autour de la ville."""
-    rayon_m = int((RAYON_KM + 5) * 1000)
+    """Stations TotalEnergies connues d'OpenStreetMap autour de la ville.
+
+    Requête légère : on demande toutes les stations-service d'un rectangle autour
+    de la ville (sans filtre de texte côté serveur), puis on filtre sur
+    « total » dans la marque, le nom ou l'exploitant ici, en Python.
+    """
     lat, lon = CENTRE
-    filtres = "".join(
-        f'nwr["amenity"="fuel"]["{cle}"~"total",i](around:{rayon_m},{lat},{lon});'
-        for cle in ("brand", "name", "operator")
-    )
-    requete = f"[out:json][timeout:60];({filtres});out center;"
+    marge_lat = (RAYON_KM + 5) / 111.0
+    marge_lon = (RAYON_KM + 5) / (111.0 * math.cos(math.radians(lat)))
+    boite = f"{lat - marge_lat:.4f},{lon - marge_lon:.4f},{lat + marge_lat:.4f},{lon + marge_lon:.4f}"
+    requete = f'[out:json][timeout:25];nwr["amenity"="fuel"]({boite});out center tags;'
     corps = urllib.parse.urlencode({"data": requete}).encode()
+
     elements, derniere_erreur = None, None
     for url in OVERPASS:  # on essaie chaque serveur jusqu'à ce qu'un réponde
         try:
             req = urllib.request.Request(url, data=corps, headers=ENTETES_OSM)
-            with urllib.request.urlopen(req, timeout=90) as r:
+            with urllib.request.urlopen(req, timeout=40) as r:
                 elements = json.load(r).get("elements", [])
             break
         except Exception as e:
             derniere_erreur = e
+            print(f"  (serveur OpenStreetMap indisponible : {url} -> {e})")
     if elements is None:
         raise derniere_erreur
+
     points = []
     for e in elements:
+        tags = e.get("tags") or {}
+        texte = " ".join(tags.get(k, "") for k in ("brand", "name", "operator")).lower()
+        if "total" not in texte:
+            continue
         c = e.get("center") or e
         if "lat" in c and "lon" in c:
             points.append((c["lat"], c["lon"]))
