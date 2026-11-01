@@ -1,4 +1,4 @@
-# Alerte carburant
+# Alerte Carburant
 
 Reçois une **notification sur ton téléphone** dès que du **SP95 ou du gazole redevient disponible** dans les stations-service de ton choix autour de Strasbourg.
 
