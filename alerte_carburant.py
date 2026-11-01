@@ -40,7 +40,16 @@ API = (
     "https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/"
     "prix-des-carburants-en-france-flux-instantane-v2/records"
 )
-OVERPASS = "https://overpass-api.de/api/interpreter"
+OVERPASS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+]
+# Overpass refuse les requêtes sans identification (erreur 406) : on se présente.
+ENTETES_OSM = {
+    "User-Agent": "alerte-carburant/1.0 (script personnel, github.com/Narzoogui/alerte-carburant)",
+    "Accept": "application/json",
+    "Content-Type": "application/x-www-form-urlencoded",
+}
 STATE_FILE = Path(__file__).with_name("etat_carburant.json")
 NOMS = {"sp95": "SP95", "gazole": "Gazole"}
 
@@ -93,9 +102,18 @@ def stations_total_osm():
         for cle in ("brand", "name", "operator")
     )
     requete = f"[out:json][timeout:60];({filtres});out center;"
-    req = urllib.request.Request(OVERPASS, data=urllib.parse.urlencode({"data": requete}).encode())
-    with urllib.request.urlopen(req, timeout=90) as r:
-        elements = json.load(r).get("elements", [])
+    corps = urllib.parse.urlencode({"data": requete}).encode()
+    elements, derniere_erreur = None, None
+    for url in OVERPASS:  # on essaie chaque serveur jusqu'à ce qu'un réponde
+        try:
+            req = urllib.request.Request(url, data=corps, headers=ENTETES_OSM)
+            with urllib.request.urlopen(req, timeout=90) as r:
+                elements = json.load(r).get("elements", [])
+            break
+        except Exception as e:
+            derniere_erreur = e
+    if elements is None:
+        raise derniere_erreur
     points = []
     for e in elements:
         c = e.get("center") or e
