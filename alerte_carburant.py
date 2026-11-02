@@ -26,12 +26,12 @@ from pathlib import Path
 
 # ------------------------- À PERSONNALISER -------------------------
 # Sur GitHub, le nom du sujet ntfy est lu dans un « secret » (variable NTFY_TOPIC).
-NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "carburant-k7x92qpl")
+NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "carb-x3w3gmgis9m2oy40owhpqtvh")
 VILLE = "Strasbourg"
 CODE_DEPARTEMENT = "67"
 CENTRE = (48.5734, 7.7521)  # centre de Strasbourg (latitude, longitude)
 RAYON_KM = 30               # rayon à vol d'oiseau autour du centre
-CARBURANTS = ["sp95", "gazole"]
+CARBURANTS = ["sp95", "e10", "gazole"]
 # ID des stations à surveiller, lus dans la variable GitHub STATION_IDS
 # (séparés par des virgules). Vide = toutes les stations de la ville.
 STATION_IDS = [i.strip() for i in os.environ.get("STATION_IDS", "").split(",") if i.strip()]
@@ -53,7 +53,7 @@ ENTETES_OSM = {
     "Content-Type": "application/x-www-form-urlencoded",
 }
 STATE_FILE = Path(__file__).with_name("etat_carburant.json")
-NOMS = {"sp95": "SP95", "gazole": "Gazole"}
+NOMS = {"sp95": "SP95", "e10": "SP95-E10", "sp98": "SP98", "gazole": "Gazole"}
 
 
 def fetch_departement():
@@ -254,8 +254,11 @@ def main():
         for c in CARBURANTS:
             cle = f"{s['id']}:{c}"
             nouveau[cle] = disponible(s, c)
-            # Alerte uniquement sur un passage indispo -> dispo (pas au tout premier lancement)
-            if ancien is not None and nouveau[cle] and not ancien.get(cle, False):
+            # Alerte uniquement sur un passage indispo -> dispo, et seulement si cet état était déjà
+            # connu au passage précédent : au premier lancement, ou pour un carburant qu'on vient
+            # d'ajouter à la surveillance, on enregistre sans alerter (pas de fausse alerte).
+            deja_connu = simulation or (ancien is not None and cle in ancien)
+            if deja_connu and nouveau[cle] and not ancien.get(cle, False):
                 alertes.append(f"{NOMS[c]} : {s.get('adresse')}, {s.get('cp')} {s.get('ville')}")
 
     if simulation:
